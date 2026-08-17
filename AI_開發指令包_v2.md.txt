@@ -1,0 +1,440 @@
+﻿涼路 CoolPath — AI 開發指令包 v2
+用法：每開一個 AI session，先貼「第一部分」，再貼你負責的那一份任務。 不要把 PRD 或簡報稿丟進去。
+
+
+v2 相對 v1 的變更
+
+
+* 產品定位改為熱暴露引擎，網站只是它的第一個客戶端
+* 導航交給 Google Maps，網站透過 URL 跳轉交棒
+* 取消動態即時更新（原因見「誠實性守則」）
+* 紫外線降為城市級單一數值顯示，不參與路線計算
+* 新增示範路線：政大 → 台北車站
+
+
+________________
+
+
+第一部分：共用 Context（每個 session 都要貼）
+我正在參加 24 小時黑客松，時間極度緊迫。請直接寫可執行的完整程式碼，不要問我要不要開始、不要給多個方案讓我選、不要留 TODO 空白。有不確定的地方，選一個合理預設值往下做，最後用一行標註你的假設。
+專案定位（很重要，會影響你怎麼寫程式）
+涼路 CoolPath 是一個熱暴露評估引擎，不是一個導航 App。
+
+
+核心產品是 /api/coolRoute 這支 API：輸入起點終點，回傳多條路線及其熱暴露分數。網站只是這支 API 的第一個客戶端，導航本身完全交給 Google Maps。
+
+
+因此：
+
+
+* API 的回傳格式要乾淨、可讀，能直接在瀏覽器打開展示給人看
+* 網站不做 turn-by-turn 導航，只做「決定走哪條」然後跳轉到 Google Maps
+* 不要為了讓網站功能豐富而把邏輯寫進前端，邏輯一律放在 Cloud Functions
+技術棧（不要更換）
+* 前端：純 HTML + vanilla JavaScript，無框架、無 build 工具
+* 地圖：Google Maps JavaScript API
+* 語音：Web Speech API (speechSynthesis)
+* 推播：FCM Web Push + Service Worker
+* 後端：Firebase Cloud Functions（Node.js 20）
+* 資料庫：Firestore
+* AI：Gemini API
+* 路線：Google Maps Routes API
+* 地表溫度：Earth Engine 預先算好的靜態 GeoJSON，不做即時運算
+專案結構
+/
+├── firebase.json
+├── public/
+│   ├── index.html
+│   ├── app.js
+│   ├── style.css
+│   ├── firebase-messaging-sw.js     # 必須在 public 根目錄
+│   └── data/taipei_lst_grid.geojson
+└── functions/
+    ├── index.js
+    ├── lst.js                        # LST 查詢共用模組
+    ├── data/taipei_lst_grid.geojson   # 同一份，functions 端也要
+    └── package.json
+firebase.json（rewrites 用來消除 CORS）
+{
+  "hosting": {
+    "public": "public",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      { "source": "/api/assessRisk", "function": "assessRisk" },
+      { "source": "/api/decide",     "function": "decide" },
+      { "source": "/api/coolRoute",  "function": "coolRoute" }
+    ]
+  },
+  "functions": { "source": "functions" }
+}
+
+前端一律呼叫 /api/xxx 相對路徑，同源，不需要處理任何 CORS。
+誠實性守則（違反會在評審問答被拆穿，比功能少更嚴重）
+事實
+	因此
+	地表溫度來自 Landsat 熱紅外，原生解析度 100 公尺
+	可比較「不同路廊」，不可宣稱能分辨「同一條路的兩側」
+	熱圖是 2023–2026 夏季影像的中位數，是氣候常態
+	不可顯示為「即時溫度」或「現在的溫度」。標示為「夏季平均地表溫度」
+	Landsat 過境時間固定約上午 10:30
+	資料代表上午時段，不是午後最熱時刻
+	紫外線來自環境部測站，台北僅一至兩站
+	城市級單一數值，不可沿路線變化，不可參與路線評分
+	熱傷害數據未涵蓋所有醫療院所
+	稱「監測數據」，不可稱「全國人數」
+	
+
+UI 文案不可出現：「即時地表溫度」、「這條路現在 42 度」、「紫外線路線規劃」、「精準到每一公尺」。
+
+
+UI 文案應該長這樣：「夏季平均地表溫度 42°C」、「資料來源：Landsat 8/9 熱紅外，100m 網格」。
+資料契約（跨模組共用，欄位名稱不可自行更改）
+// RiskAssessment — 風險計算模組輸出
+{
+  "level": "low",              // "low" | "medium" | "high"
+  "feelsLike": 41.2,           // 體感溫度 °C（Heat Index）
+  "airTemp": 34.5,
+  "humidity": 72,
+  "uvi": 9,                    // 城市級單一數值
+  "surfaceTemp": 42.1,         // 該點夏季平均地表溫度
+  "dataTime": "2026-08-17T14:00:00+08:00"
+}
+
+
+// RouteOption — 核心產品輸出
+{
+  "polyline": "encoded_polyline_string",
+  "durationSec": 2100,
+  "distanceM": 13400,
+  "heatScore": 38.4,           // 沿線平均地表溫度 °C
+  "maxSurfaceTemp": 44.2,
+  "samplePoints": 268,         // 取樣點數，展示可信度用
+  "label": "coolest",          // "coolest" | "fastest"
+  "mapsUrl": "https://www.google.com/maps/dir/?api=1&..."
+}
+
+
+// AgentDecision — Gemini 判斷層輸出
+{
+  "level": "high",
+  "shouldNotify": true,        // false 代表刻意不打擾使用者
+  "headline": "建議改走新生南路，低 6 度",
+  "action": "多花 5 分鐘，沿線平均地表溫度從 44 度降到 38 度",
+  "reason": "體感 41 度，UVI 9 屬過量級",
+  "speech": "建議改走新生南路路線，多花五分鐘，沿線溫度低六度。"
+}
+風險分級門檻
+等級
+	條件
+	low
+	體感 < 32°C 且 UVI < 6
+	medium
+	體感 32–36°C 或 UVI 6–7
+	high
+	體感 > 36°C 或 UVI ≥ 8 或路線最高地表溫度 > 40°C
+	示範路線（Demo 寫死這一組）
+起點：國立政治大學  24.9874, 121.5759
+終點：台北車站      25.0488, 121.5137
+硬性限制
+1. 不做登入註冊，使用者 ID 寫死 demo_user
+2. 不使用 localStorage / sessionStorage
+3. 不做動態即時重算路線，出發前算一次即可
+4. 所有外部 API 呼叫須有 try/catch 與 5 秒逾時，失敗回傳快取或預設值，絕不可讓頁面崩潰
+5. 補水建議只能是白開水或電解質飲料，不可建議含糖飲料
+6. Demo 目標裝置為 Chrome on Android，不需為 iOS Safari 最佳化
+
+
+________________
+
+
+第二部分：任務指令
+任務 D — 熱暴露評分引擎（Frank）｜最高優先，這是核心產品
+寫 Cloud Function coolRoute，接收 {origin, destination, mode}，回傳 RouteOption[]。
+
+
+支援 GET 查詢字串，讓人可以直接在瀏覽器打開看 JSON：
+
+
+/api/coolRoute?origin=24.9874,121.5759&destination=25.0488,121.5137&mode=driving
+實作
+注意：Routes API 不支援自訂多邊形迴避或自訂成本函數（僅有 avoidTolls / avoidHighways / avoidFerries / avoidIndoor）。評分演算法必須自行實作。
+
+
+1. 呼叫 Routes API computeRoutes，設 computeAlternativeRoutes: true
+   * Field mask 需含 routes.polyline.encodedPolyline、routes.duration、routes.distanceMeters
+   * travelMode 給 DRIVE（機車無專屬選項）
+2. 解碼每條 polyline 還原座標序列
+3. 沿線每 50 公尺取樣一點
+4. 每個取樣點查 LST 網格（functions/data/taipei_lst_grid.geojson），求平均與最大值
+5. heatScore 最低者標 coolest，durationSec 最短者標 fastest（可為同一條）
+6. 為每條路線產生 mapsUrl（見下）
+7. 依 heatScore 排序回傳
+mapsUrl 產生方式
+從該條路線的 polyline 均勻取 3–5 個中繼點（Google Maps URL 的 waypoints 上限為 9），組成：
+
+
+https://www.google.com/maps/dir/?api=1
+&origin={lat},{lng}
+&destination={lat},{lng}
+&waypoints={lat},{lng}|{lat},{lng}|{lat},{lng}
+&travelmode=driving
+
+⚠️ 產生後必須人工實測：點開連結，確認 Google 重現出來的路線與原本算的最涼路線吻合。若偏離，增加中繼點密度。
+共用模組
+把 LST 查詢抽成 functions/lst.js：
+
+
+// 啟動時載入 GeoJSON 到記憶體一次
+function lookupSurfaceTemp(lat, lng)  // number | null，超過 500m 無資料回傳 null
+
+________________
+
+
+任務 A — 前端網站（Ian）
+建立 public/index.html、app.js、style.css。純 vanilla JS。
+A1. 地圖與熱區圖層
+Google Maps JavaScript API 顯示台北市，載入 data/taipei_lst_grid.geojson 疊加熱區。
+
+
+效能警告：格點約 16,000 點，不可一次全部渲染，會嚴重卡頓。
+
+
+* 監聽地圖 idle 事件，只渲染目前視野內的點
+* 單次上限 2,000 點，超過依比例抽樣
+* 用 google.maps.Circle，radius: 100、fillOpacity: 0.45、strokeWeight: 0
+* 色階：26°C #2c7bb6 → 32°C #abd9e9 → 36°C #ffffbf → 40°C #fdae61 → 44°C #d7191c，線性內插
+* 圖例上標註：「夏季平均地表溫度｜Landsat 8/9｜100m 網格」
+A2. 路線查詢與對比（這是主畫面）
+* 起點終點輸入框，預設值填入政大與台北車站
+* 一顆「規劃路線」按鈕 → fetch('/api/coolRoute?...')
+* 兩條路線同時畫在地圖上：最涼用藍色，最快用紅色
+* 下方並排兩張卡片，各顯示：
+   * 時間、距離
+   * 沿線平均地表溫度（大字，這是重點）
+   * 最高溫路段溫度
+* 中間一行對比結論：「多花 5 分鐘，平均低 6 度」（由兩者相減自動算出）
+A3. 交棒 Google Maps
+每張路線卡片下方一顆按鈕「用 Google Maps 導航」，點擊直接 window.location.href = routeOption.mapsUrl。
+
+
+這是產品定位的體現，按鈕文案不要改。
+A4. 語音播報
+function speak(text) {
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'zh-TW';
+  speechSynthesis.speak(u);
+}
+
+兩個必須處理的陷阱：
+
+
+1. Chrome 要求首次發聲必須由使用者手勢觸發。頁面上要有一顆「開始」按鈕，首次點擊時先 speechSynthesis.speak(new SpeechSynthesisUtterance('')) 解鎖
+2. getVoices() 初次可能回傳空陣列，要監聽 speechSynthesis.onvoiceschanged 後再挑 zh-TW 語音
+
+
+另附一顆手動重播按鈕。
+A5. 環境資訊列
+畫面上方一列顯示 RiskAssessment：氣溫、體感、濕度、UVI。
+
+
+UVI 旁標註「台北市即時測站值」，不要放在路線卡片裡，避免暗示它與路線相關。
+A6. FCM Web Push
+步驟一：Firebase Console → 專案設定 → Cloud Messaging → Web Push certificates → Generate key pair，取得 VAPID key。
+
+
+步驟二：建立 public/firebase-messaging-sw.js（必須在 public 根目錄，否則 scope 不對）：
+
+
+importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js');
+
+
+firebase.initializeApp({ /* firebaseConfig */ });
+const messaging = firebase.messaging();
+
+
+messaging.onBackgroundMessage((payload) => {
+  self.registration.showNotification(
+    payload.notification.title,
+    { body: payload.notification.body, icon: '/icon.png' }
+  );
+});
+
+步驟三：Notification.requestPermission() 必須由使用者手勢觸發，掛在同一顆「開始」按鈕。取得 token 後寫入 Firestore users/demo_user 的 fcmToken 欄位。
+
+
+步驟四：onMessage() 處理前景訊息，自行顯示並觸發語音。
+A7. Demo 觸發按鈕
+一顆明顯按鈕，直接依序呼叫 /api/assessRisk → /api/coolRoute → /api/decide，不依賴推播。這是台上的保險。
+開發順序
+先寫死假的 RouteOption[] 讓畫面跑起來，後端接口留一個函式抽換。先讓畫面動起來，其他人才有東西對接。
+
+
+________________
+
+
+任務 B — 環境風險計算（Amelia）
+寫 Cloud Function assessRisk，接收 {lat, lng}，回傳 RiskAssessment。
+
+
+1. 中央氣象署 opendata 取最近測站的溫度與相對濕度（授權碼放環境變數）
+2. 環境部 UV_S_01 取台北 UVI
+3. NOAA Heat Index 公式（攝氏版）算體感溫度
+4. surfaceTemp 呼叫 lst.js 的 lookupSurfaceTemp
+5. 依門檻表判定 level
+6. 兩個外部 API 各給 5 秒逾時與 try/catch。失敗時讀 Firestore cache/weather 最後一筆，dataTime 須反映實際資料時間
+7. 成功時寫回 cache/weather
+
+
+________________
+
+
+任務 C — Gemini 判斷層（Lin）
+寫 Cloud Function decide，接收 RiskAssessment 與 RouteOption[]，呼叫 Gemini API 回傳 AgentDecision。
+
+
+這是 Agent 的核心，重點是「決策」不是「生成文字」。 System prompt 必須要求 Gemini：
+
+
+* 從所有訊號中只挑出此刻最重要的一件事來講，不要條列所有指標
+* action 必須具體且含數字（「多花 5 分鐘，低 6 度」），不可是「請多加注意」這類空話
+* level 為 low 時 shouldNotify 必須為 false —— 系統要能判斷不打擾使用者
+* speech 為口語化短句，30 字內。數字用國字（「四十二度」而非「42度」，避免 TTS 讀錯）
+* 補水建議只能是白開水或電解質飲料
+* 不可宣稱地表溫度是即時值
+
+
+要求 Gemini 只輸出 JSON、不加 markdown 圍欄。解析前先 strip 掉可能的 ```json 標記，用 try/catch 包住 JSON.parse，失敗時回傳規則式的預設 decision。
+
+
+________________
+
+
+任務 E — 部署（越早越好）
+npm install -g firebase-tools
+firebase login
+firebase init hosting functions
+firebase deploy
+
+拿到 專案名.web.app 後：
+
+
+1. 立刻用手機掃 QR 測一次，確認 HTTPS、定位、語音都正常
+2. 確認 /api/coolRoute?origin=...&destination=... 在瀏覽器直接打開能看到 JSON
+3. 明早把可跑版本推到 preview channel 當備案：firebase hosting:channel:deploy demo
+4. 產生 QR code 放進簡報，讓評審自己用手機打開
+FCM 推播高優先級（決定 Demo 高潮）
+送推播時 payload 必須含 notification 區塊（只有 data 的話 Chrome 不顯示橫幅），並設高優先級：
+
+
+await admin.messaging().send({
+  token,
+  notification: { title, body },
+  android: { priority: 'high' },
+  webpush: { headers: { Urgency: 'high' } }
+});
+
+目標效果：使用者正在用 Google Maps 導航時，橫幅從畫面上方蓋在 Google Maps 上滑下來。
+
+
+________________
+
+
+整合順序
+1. Frank 的 coolRoute 最優先 —— 這是核心產品，沒有它整場簡報是空的
+2. Ian 用假資料把畫面撐起來，讓其他人有東西對接
+3. 任務 E 部署要早做，HTTPS 是定位與推播的前提，localhost 測不出完整行為
+4. Amelia 的 assessRisk 通了 → Lin 才能測 decide
+5. 03:00 整合檢查點：串成一條完整 Demo 路徑。未通則停止新功能，全員轉入除錯與簡報
+
+
+________________
+
+
+Demo 腳本（開發時照這條路徑驗證）
+1. 網頁預設政大 → 台北車站，按「規劃路線」
+2. 地圖出現兩條路線，藍色最涼、紅色最快
+3. 對比卡片顯示「多花 5 分鐘，平均低 6 度」
+4. 點「用 Google Maps 導航」→ 跳進 Google Maps
+5. 觸發推播 → 橫幅蓋在 Google Maps 上
+6. 回到瀏覽器，打開 /api/coolRoute?... 展示原始 JSON
+
+
+第 6 步是證明「我們是引擎不是 App」的關鍵，API 回傳格式要乾淨到可以直接投影給人看。
+
+
+________________
+
+
+常見卡點速查
+症狀
+	原因
+	定位一直失敗
+	沒跑在 HTTPS 上（localhost 除外）
+	Service Worker 註冊失敗
+	firebase-messaging-sw.js 不在 public 根目錄
+	語音第一次不出聲
+	Chrome 需使用者手勢解鎖，用「開始」按鈕觸發
+	語音數字讀錯
+	speech 欄位改用國字
+	地圖嚴重卡頓
+	一次渲染太多格點，改為只渲染視野內並抽樣
+	fetch 被 CORS 擋
+	沒用 /api/ 相對路徑，或 rewrites 沒設
+	推播沒有橫幅
+	payload 缺 notification 區塊，或未設高優先級
+	Google Maps 跳轉後路線不對
+	waypoint 太少或位置不佳，增加密度重測
+	LST 查詢全部回傳 null
+	GeoJSON 沒複製到 functions/data/，或經緯度順序顛倒（GeoJSON 是 [lng, lat]）
+	
+
+________________
+
+
+附錄：Earth Engine 前處理腳本
+於 code.earthengine.google.com 執行。Earth Engine 沒有 API key，用 OAuth 登入，右上角選到已註冊的 Cloud project 即可。
+
+
+var taipei = ee.Geometry.Rectangle([121.45, 24.95, 121.67, 25.21]);
+
+
+function prep(img) {
+  var lst = img.select('ST_B10')
+    .multiply(0.00341802).add(149.0).subtract(273.15)   // Kelvin → 攝氏
+    .rename('LST');
+  var qa = img.select('QA_PIXEL');
+  var mask = qa.bitwiseAnd(1 << 3).eq(0)                // 去雲
+              .and(qa.bitwiseAnd(1 << 4).eq(0));        // 去雲影
+  return lst.updateMask(mask);
+}
+
+
+var col = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+  .merge(ee.ImageCollection('LANDSAT/LC09/C02/T1_L2'))
+  .filterBounds(taipei)
+  .filterDate('2023-06-01', '2026-09-30')
+  .filter(ee.Filter.calendarRange(6, 9, 'month'))       // 僅夏季
+  .filter(ee.Filter.lt('CLOUD_COVER', 30))
+  .map(prep);
+
+
+var lst = col.median().clip(taipei);
+
+
+Map.centerObject(taipei, 11);
+Map.addLayer(lst, {min: 26, max: 44,
+  palette: ['#2c7bb6','#abd9e9','#ffffbf','#fdae61','#d7191c']}, 'LST');
+
+
+var grid = lst.sample({region: taipei, scale: 200, geometries: true});
+Export.table.toDrive({
+  collection: grid,
+  description: 'taipei_lst_grid',
+  fileFormat: 'GeoJSON'
+});
+
+驗證：圖層數值應落在約 28–45°C。若出現三百餘之值為未減 273.15；若整片空白則放寬日期範圍或雲量門檻。
+
+
+匯出後把 GeoJSON 同時放進 public/data/ 與 functions/data/。

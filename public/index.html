@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0c2340">
+  <title>涼路 CoolPath — 找一條更涼的路</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍃</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- 佔位資料警告：後端回報 lstSource 為合成資料時才顯示 -->
+<div id="placeholderWarning" class="warning-bar hidden">
+  ⚠️ 熱區圖目前使用<strong>合成佔位資料</strong>（全台示範網格、大台北高解析），非 Landsat 觀測值，
+  數值僅供流程展示。
+</div>
+
+<!-- 深色 Hero：品牌列 + 起訖輸入 -->
+<div class="hero">
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🍃</span>
+      <div>
+        <h1>涼路 CoolPath</h1>
+        <p class="tagline">找一條更涼的路</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div id="cwaPill" class="cwa-pill hidden">
+        <span class="cwa-dot"></span><span id="cwaPillText"></span>
+      </div>
+      <button id="startBtn" class="btn btn-start" title="啟用語音與推播">開始</button>
+      <button id="infoBtn" class="btn-icon" title="資料來源說明" aria-label="資料來源說明">ⓘ</button>
+    </div>
+  </header>
+
+  <section class="route-panel">
+    <div class="route-inputs">
+      <div class="route-row">
+        <span class="pin pin-origin" aria-hidden="true"></span>
+        <div class="route-field">
+          <label for="originInput">起點</label>
+          <input id="originInput" type="text" placeholder="輸入地名、地址或座標" autocomplete="off">
+        </div>
+        <button id="locateBtn" class="btn-icon" title="使用目前位置" aria-label="使用目前位置">◎</button>
+      </div>
+      <div class="route-sep"></div>
+      <div class="route-row">
+        <span class="pin pin-dest" aria-hidden="true"></span>
+        <div class="route-field">
+          <label for="destInput">終點</label>
+          <input id="destInput" type="text" placeholder="輸入地名、地址或座標" autocomplete="off">
+        </div>
+        <button id="swapBtn" class="btn-icon" title="交換起點與終點" aria-label="交換起點與終點">⇅</button>
+      </div>
+    </div>
+    <div class="mode-row" role="radiogroup" aria-label="交通方式">
+      <button class="mode-btn active" data-mode="scooter" type="button">🛵 機車</button>
+      <button class="mode-btn" data-mode="walking" type="button">🚶 步行</button>
+      <button class="mode-btn" data-mode="driving" type="button">🚗 開車</button>
+    </div>
+    <span id="modeHint" class="mode-hint">機車路線以汽車路線近似（Routes API 無機車選項）</span>
+    <div class="route-actions">
+      <button id="planBtn" class="btn btn-search">🍃 尋找涼爽路線</button>
+      <button id="demoBtn" class="btn-link">✨ 一鍵示範</button>
+    </div>
+  </section>
+</div>
+
+<main class="page">
+
+  <!-- A5 環境資訊列 -->
+  <section id="envBar" class="env-bar">
+    <div class="env-item">
+      <span class="env-label">氣溫</span>
+      <span class="env-value"><span class="env-icon">🌡️</span><span id="envAirTemp">--</span></span>
+      <span class="env-note" id="envWeatherNote">載入中</span>
+    </div>
+    <div class="env-item">
+      <span class="env-label">體感溫度</span>
+      <span class="env-value env-feels"><span class="env-icon">🧍</span><span id="envFeelsLike">--</span></span>
+      <span class="env-note" id="envFeelsNote">載入中</span>
+    </div>
+    <div class="env-item">
+      <span class="env-label">濕度</span>
+      <span class="env-value"><span class="env-icon">💧</span><span id="envHumidity">--</span></span>
+    </div>
+    <div class="env-item">
+      <span class="env-label">UVI</span>
+      <span class="env-value"><span class="env-icon">☀️</span><span id="envUvi">--</span></span>
+      <span class="env-note" id="envUviNote">載入中</span>
+    </div>
+    <div class="env-item env-level">
+      <span class="env-label">熱風險</span>
+      <span class="env-value"><span class="env-icon">🔥</span><span id="envLevel">--</span></span>
+    </div>
+  </section>
+
+  <div id="dataQuality" class="data-quality hidden" role="status"></div>
+  <div id="status" class="status hidden"></div>
+
+  <!-- A1 地圖與熱區圖層 -->
+  <div class="map-wrap">
+    <div id="map"></div>
+    <div id="mapCoverageNotice" class="map-coverage-notice hidden">目前視野沒有溫度資料</div>
+    <div class="legend">
+      <div class="legend-title" id="legendTitle">地表溫度（°C）</div>
+      <div class="legend-scale">
+        <span class="legend-swatch" style="background:#2c7bb6"></span>
+        <span class="legend-swatch" style="background:#abd9e9"></span>
+        <span class="legend-swatch" style="background:#ffffbf"></span>
+        <span class="legend-swatch" style="background:#fdae61"></span>
+        <span class="legend-swatch" style="background:#d7191c"></span>
+      </div>
+      <div class="legend-ticks"><span>26</span><span>32</span><span>38</span><span>44</span></div>
+      <div class="legend-cool-hot"><span class="cool">涼</span><span class="hot">熱</span></div>
+      <div class="legend-source" id="legendSource">資料載入中</div>
+      <div class="legend-scope" id="legendScope"></div>
+      <div class="legend-count" id="legendCount"></div>
+    </div>
+  </div>
+
+  <!-- 對比結論 -->
+  <div id="comparison" class="comparison hidden"></div>
+
+  <!-- 路線卡片 -->
+  <section id="cards" class="cards"></section>
+
+  <!-- Gemini 判斷層輸出 -->
+  <section id="decision" class="decision hidden">
+    <div class="decision-head">
+      <span id="decisionLevel" class="pill">--</span>
+      <button id="replayBtn" class="btn btn-ghost">🔊 重播語音</button>
+    </div>
+    <h2 id="decisionHeadline"></h2>
+    <p id="decisionAction" class="decision-action"></p>
+    <p id="decisionReason" class="decision-reason"></p>
+    <p id="decisionQuiet" class="decision-quiet hidden">此等級系統判定<strong>不打擾</strong>使用者，不發送推播。</p>
+  </section>
+
+  <!-- A3 導航交棒列：規劃完成後出現 -->
+  <div id="actionBar" class="action-bar hidden">
+    <button id="navBtn" class="btn btn-nav-primary">用 Google Maps 導航（涼爽路線）</button>
+    <button id="shareBtn" class="btn btn-share" title="分享">分享</button>
+  </div>
+
+  <footer id="sources" class="footer">
+    <p><strong>資料來源</strong></p>
+    <ul>
+      <li>地表溫度：目前為全台合成示範網格（本島 1.1km、大台北 200m）。換成 Landsat 8/9 ST_B10 後仍屬衛星過境觀測或期間合成，並非即時溫度。</li>
+      <li>氣溫與相對濕度：中央氣象署自動氣象站觀測資料。</li>
+      <li>紫外線指數：環境部有發布觀測時使用測站值；無資料時介面會明確標示快取或預設值。UVI 為城市級單一數值，不參與路線溫度評分。</li>
+    </ul>
+    <p class="footer-note">本服務評估的是不同路廊之間的熱暴露差異，無法分辨同一條路的兩側。導航由 Google Maps 提供。</p>
+  </footer>
+
+</main>
+
+<script src="config.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

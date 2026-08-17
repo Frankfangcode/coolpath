@@ -1,0 +1,22 @@
+{
+  "name": "coolpath-functions",
+  "description": "涼路 CoolPath — 熱暴露評估引擎 Cloud Functions",
+  "private": true,
+  "main": "index.js",
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "serve": "firebase emulators:start --only functions,hosting",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log",
+    "test": "node test/lst.test.js && node test/coolRoute.test.js && node test/risk.test.js && node test/gemini.test.js",
+    "verify:lst": "node ../tools/verify_lst_grid.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.7.0",
+    "firebase-functions": "^6.1.1",
+    "google-auth-library": "^9.15.1"
+  },
+  "devDependencies": {}
+}

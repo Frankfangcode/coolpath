@@ -1,0 +1,26 @@
+{
+  "hosting": {
+    "public": "public",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      { "source": "/api/assessRisk", "function": "assessRisk" },
+      { "source": "/api/decide",     "function": "decide" },
+      { "source": "/api/coolRoute",  "function": "coolRoute" },
+      { "source": "/api/notify",     "function": "notify" }
+    ],
+    "headers": [
+      {
+        "source": "/firebase-messaging-sw.js",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      },
+      {
+        "source": "/data/**",
+        "headers": [{ "key": "Cache-Control", "value": "public, max-age=3600" }]
+      }
+    ]
+  },
+  "functions": {
+    "source": "functions",
+    "ignore": ["node_modules", ".git", "*.local"]
+  }
+}

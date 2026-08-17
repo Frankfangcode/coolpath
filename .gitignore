@@ -1,0 +1,8 @@
+node_modules/
+.firebase/
+functions/.env
+functions/.env.*
+!functions/.env.example
+public/config.local.js
+*.log
+.DS_Store

@@ -1,0 +1,13 @@
+{
+  "name": "coolpath",
+  "version": "1.0.0",
+  "description": "涼路 CoolPath — 熱暴露評估引擎",
+  "private": true,
+  "scripts": {
+    "dev": "node tools/dev_server.js",
+    "preflight": "node tools/preflight.js",
+    "test": "cd functions && npm test",
+    "verify:lst": "node tools/verify_lst_grid.js",
+    "grid:placeholder": "node tools/make_placeholder_grid.js"
+  }
+}
