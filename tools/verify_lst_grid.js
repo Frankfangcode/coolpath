@@ -98,10 +98,16 @@ if (features.length === 0) {
     '預期約 14,000–17,000',
     'scale 可能設得比 200 大，或雲遮罩吃掉太多資料'
   );
-} else if (features.length > 40000) {
-  warn(`${features.length} 點，比預期多`, 'scale 可能小於 200，檔案會偏大影響前端載入');
+} else if (features.length > 150000) {
+  warn(
+    `${features.length} 點，太多`,
+    'scale 可能小於 100（比 Landsat 原生解析度還細，沒有意義），檔案會拖慢前端載入'
+  );
 } else {
-  ok(`${features.length} 點`, '預期約 14,000–17,000');
+  ok(
+    `${features.length} 點`,
+    '大台北 100m 約 55,000–70,000；200m 約 14,000–17,000；併入全台 1km 再加約 35,000'
+  );
 }
 
 /* ────────────────────────── 溫度欄位 ────────────────────────── */

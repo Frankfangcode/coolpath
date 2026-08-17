@@ -192,6 +192,11 @@ function t(name, fn) {
     assert.strictEqual(sent.travelMode, 'DRIVE');
   });
 
+  t('開車模式帶 TRAFFIC_AWARE（時間要含即時路況才對得上 Google Maps）', () => {
+    const sent = JSON.parse(lastRequest.options.body);
+    assert.strictEqual(sent.routingPreference, 'TRAFFIC_AWARE');
+  });
+
   t('每條路線都有資料契約要求的全部欄位', () => {
     const required = [
       'polyline', 'durationSec', 'distanceM', 'heatScore',
@@ -284,6 +289,56 @@ function t(name, fn) {
       }
     }
   });
+
+  /**
+   * 機車模式的迴歸測試。曾經把 scooter 對應到 DRIVE，導致兩個問題：
+   * 推薦的「最涼路線」是機車不能走的國道，且時間對不上 Google Maps 的機車導航。
+   */
+  {
+    const scooter = await invoke({
+      origin: '24.9874,121.5759',
+      destination: '25.0488,121.5137',
+      mode: 'scooter',
+    });
+
+    t('機車模式送出 TWO_WHEELER，不是 DRIVE（機車不能上國道）', () => {
+      const sent = JSON.parse(lastRequest.options.body);
+      assert.strictEqual(sent.travelMode, 'TWO_WHEELER');
+      assert.strictEqual(sent.routingPreference, 'TRAFFIC_AWARE');
+    });
+
+    t('機車模式回應標明 travelMode，mapsUrl 用 two-wheeler 交棒', () => {
+      assert.strictEqual(scooter.body.query.travelMode, 'TWO_WHEELER');
+      for (const r of scooter.body.routes) {
+        const u = new URL(r.mapsUrl);
+        assert.strictEqual(u.searchParams.get('travelmode'), 'two-wheeler');
+      }
+    });
+
+    await invoke({
+      origin: '24.9874,121.5759',
+      destination: '25.0488,121.5137',
+      mode: 'motorcycle',
+    });
+    t('motorcycle 也對應到 TWO_WHEELER', () => {
+      assert.strictEqual(JSON.parse(lastRequest.options.body).travelMode, 'TWO_WHEELER');
+    });
+
+    const walk = await invoke({
+      origin: '24.9874,121.5759',
+      destination: '25.0488,121.5137',
+      mode: 'walking',
+    });
+
+    t('步行模式不帶 routingPreference（WALK 帶了會被 API 拒絕）', () => {
+      const sent = JSON.parse(lastRequest.options.body);
+      assert.strictEqual(sent.travelMode, 'WALK');
+      assert.strictEqual(sent.routingPreference, undefined);
+      for (const r of walk.body.routes) {
+        assert.strictEqual(new URL(r.mapsUrl).searchParams.get('travelmode'), 'walking');
+      }
+    });
+  }
 
   t('comparison 的分鐘差與溫差算得對', () => {
     const cool = body.routes.find((r) => r.label === 'coolest');

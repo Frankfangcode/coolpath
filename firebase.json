@@ -21,6 +21,6 @@
   },
   "functions": {
     "source": "functions",
-    "ignore": ["node_modules", ".git", "*.local"]
+    "ignore": ["node_modules", ".git", "*.local", "test", ".env.example"]
   }
 }

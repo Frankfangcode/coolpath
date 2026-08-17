@@ -10,7 +10,24 @@
  * 先看 Console 的六項檢查，全部合格再去 Tasks 分頁按 RUN。
  */
 
-var taipei = ee.Geometry.Rectangle([121.45, 24.95, 121.67, 25.21]);
+/* ══════════════════════════════════════════════════════════════════
+   設定 —— 只改這一區
+   ══════════════════════════════════════════════════════════════════ */
+
+// 大台北示範範圍。要涵蓋你 Demo 路線的起訖點與所有替代路線。
+var BBOX = [121.45, 24.95, 121.67, 25.21];
+
+// 取樣間距（公尺）。Landsat ST_B10 原生 100m，取樣比它細沒有意義。
+//   100 → 約 64,000 點、6 MB，能分辨有行道樹與無遮蔽的路廊 ← 建議值
+//   200 → 約 16,000 點、1.5 MB，只能分辨區域尺度（市區 vs 山區）
+// TA 是行人與機車騎士，他們走的是平面道路，需要 100m 才看得出差異。
+var SCALE = 100;
+
+var EXPORT_NAME = 'taipei_lst_grid';
+
+/* ══════════════════════════════════════════════════════════════════ */
+
+var taipei = ee.Geometry.Rectangle(BBOX);
 
 function prep(img) {
   var lst = img.select('ST_B10')
@@ -96,8 +113,15 @@ print(ui.Chart.image.histogram({image: lst, region: taipei, scale: 200, maxPixel
   .setOptions({title: '夏季平均地表溫度分布', hAxis: {title: '°C'}}));
 
 print('═══ 檢查 6：網格點數 ═══');
-print('合格標準：約 14,000–17,000 點。差太多代表 scale 設錯。');
-var grid = lst.sample({region: taipei, scale: 200, geometries: true});
+print('合格標準：SCALE=100 約 55,000–70,000 點；SCALE=200 約 14,000–17,000 點。');
+print('  差太多代表 SCALE 設錯，或雲遮罩吃掉太多像元。');
+// tileScale 提高可避免 100m 取樣時的記憶體超限（Computation timed out）
+var grid = lst.sample({
+  region: taipei,
+  scale: SCALE,
+  geometries: true,
+  tileScale: 4
+});
 print('網格點數', grid.size());
 print('前 3 筆（確認 properties 裡是 LST，geometry 是 Point）', grid.limit(3));
 
@@ -111,6 +135,6 @@ print('前 3 筆（確認 properties 裡是 LST，geometry 是 Point）', grid.l
 
 Export.table.toDrive({
   collection: grid,
-  description: 'taipei_lst_grid',
+  description: EXPORT_NAME,
   fileFormat: 'GeoJSON'
 });

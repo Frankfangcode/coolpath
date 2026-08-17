@@ -25,7 +25,7 @@ const USE_MOCK = new URLSearchParams(location.search).has('mock');
 
 // TA 是行人與機車騎士：機車預設，各模式的提示與時間用詞
 const MODE_INFO = {
-  scooter: { hint: '機車路線以汽車路線近似（Routes API 無機車選項）', timeWord: '騎乘' },
+  scooter: { hint: '走機車路網、自動避開國道，時間含即時路況', timeWord: '騎乘' },
   walking: { hint: '步行速度慢、曝曬時間長，涼爽路線的差距最有感', timeWord: '步行' },
   driving: { hint: '車廂有遮蔽，熱暴露影響相對較低', timeWord: '行車' },
 };

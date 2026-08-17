@@ -8,18 +8,20 @@
  *   3. vapidKey    — Firebase Console → 專案設定 → Cloud Messaging → Web Push certificates → Generate key pair
  */
 self.COOLPATH_CONFIG = {
-  mapsApiKey: 'REPLACE_WITH_MAPS_JS_API_KEY',
+  mapsApiKey: 'AIzaSyDOeiLcY1PpitveFTZym2Dis58rlZhIwlU',
 
   firebase: {
-    apiKey: 'REPLACE_WITH_FIREBASE_API_KEY',
-    authDomain: 'coolpath-demo.firebaseapp.com',
-    projectId: 'coolpath-demo',
-    storageBucket: 'coolpath-demo.appspot.com',
-    messagingSenderId: 'REPLACE_WITH_SENDER_ID',
-    appId: 'REPLACE_WITH_APP_ID',
+    apiKey: "AIzaSyATI5n-haQYWGlfteFYKK3oS5lP2173UxQ",
+  authDomain: "devjam26aug17tpe-1210.firebaseapp.com",
+  projectId: "devjam26aug17tpe-1210",
+  storageBucket: "devjam26aug17tpe-1210.firebasestorage.app",
+  messagingSenderId: "239652904792",
+  appId: "1:239652904792:web:bce99680eb9c3d44380f2d"
   },
 
-  vapidKey: 'REPLACE_WITH_VAPID_PUBLIC_KEY',
+  
+
+  vapidKey: 'BEj0lOCiZ9ECR-KsrptdzTdUObqnBTFHkRfhe6RCG-m2U10XcTmazFigywd5E5_gz9TUboXHCHHkMbtYCUYfx2g',
 
   // 示範路線：政大 → 台北車站
   demo: {

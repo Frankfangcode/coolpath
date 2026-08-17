@@ -38,11 +38,18 @@ const LOCAL_DEV = process.env.COOLPATH_LOCAL_DEV === '1';
    任務 D — coolRoute：熱暴露評分引擎（核心產品）
    ══════════════════════════════════════════════════════════════════ */
 
+/**
+ * Routes API 的 TWO_WHEELER 是真正的機車模式（台灣、印度、越南等地支援），
+ * 不是 DRIVE 的近似。差別很大且不能省：
+ *   - 機車不能上國道，TWO_WHEELER 會自動排除；用 DRIVE 會推薦違法路線
+ *   - 時間與距離都不同，用 DRIVE 算出來的數字對不上 Google Maps 的機車導航
+ */
 const TRAVEL_MODE = {
   driving: 'DRIVE',
   drive: 'DRIVE',
-  motorcycle: 'DRIVE', // Routes API 無機車專屬選項，用 DRIVE 近似
-  scooter: 'DRIVE',
+  motorcycle: 'TWO_WHEELER',
+  scooter: 'TWO_WHEELER',
+  twowheeler: 'TWO_WHEELER',
   walking: 'WALK',
   walk: 'WALK',
   bicycling: 'BICYCLE',
@@ -81,8 +88,12 @@ async function computeRoutes(originWp, destinationWp, travelMode) {
     languageCode: 'zh-TW',
     units: 'METRIC',
   };
-  // routingPreference 只對 DRIVE / TWO_WHEELER 合法
-  if (travelMode === 'DRIVE') body.routingPreference = 'TRAFFIC_UNAWARE';
+  // routingPreference 只對 DRIVE / TWO_WHEELER 合法。
+  // 用 TRAFFIC_AWARE 才會把即時路況算進去，卡片上的時間才對得上 Google Maps 顯示的時間
+  // （代價是計費 SKU 較高、回應稍慢；要省錢改回 TRAFFIC_UNAWARE，但時間會偏樂觀）
+  if (travelMode === 'DRIVE' || travelMode === 'TWO_WHEELER') {
+    body.routingPreference = 'TRAFFIC_AWARE';
+  }
 
   const data = await fetchWithTimeout('https://routes.googleapis.com/directions/v2:computeRoutes', {
     method: 'POST',
@@ -116,7 +127,16 @@ function buildMapsUrl(points, mode) {
   const fmt = (p) => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`;
 
   const waypoints = geo.pickWaypoints(points, WAYPOINT_COUNT).map(fmt).join('|');
-  const travelmode = mode === 'WALK' ? 'walking' : mode === 'BICYCLE' ? 'bicycling' : 'driving';
+  // two-wheeler 是 Google Maps URL 的機車模式（實測會轉成 data=!3e9），
+  // 台灣有支援。交棒過去才會沿用機車路網，時間也才跟我們算的一致。
+  const travelmode =
+    mode === 'WALK'
+      ? 'walking'
+      : mode === 'BICYCLE'
+        ? 'bicycling'
+        : mode === 'TWO_WHEELER'
+          ? 'two-wheeler'
+          : 'driving';
 
   const params = new URLSearchParams({
     api: '1',

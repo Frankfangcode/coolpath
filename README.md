@@ -34,9 +34,12 @@ GET /api/coolRoute?origin=24.9874,121.5759&destination=25.0488,121.5137&mode=dri
 │   └── package.json
 └── tools/
     ├── dev_server.js                # 本機開發伺服器，免 firebase-tools 免 key
-    ├── earthengine_lst_export.js    # EE 匯出腳本（含匯出前六項檢查）
-    ├── verify_lst_grid.js           # 匯出後驗證 + 安裝到兩個 data 目錄
-    └── make_placeholder_grid.js     # 產生佔位網格用
+    ├── earthengine_lst_export.js         # EE：大台北 100m（含匯出前六項檢查）
+    ├── earthengine_taiwan_grid_export.js # EE：全台本島 1km
+    ├── earthengine_taiwan_latest_lst.js  # EE：全台「最新可用」觀測，輸出 GeoTIFF
+    ├── merge_lst_grids.js                # 合併兩份匯出 → 雙解析度網格
+    ├── verify_lst_grid.js                # 驗證 + 安裝到兩個 data 目錄
+    └── make_placeholder_grid.js          # 產生佔位網格用
 ```
 
 ---
@@ -114,21 +117,54 @@ Landsat 不能提供真正即時溫度。Landsat 8 與 9 合併後名義重訪�
 Export task。正式服務應使用 Earth Engine-enabled Google Cloud project 與 ADC
 或服務帳號，私鑰不得放入前端或版本庫。
 
-**步驟一：匯出前先在 EE Console 驗證。**
-把 `tools/earthengine_lst_export.js` 貼到 https://code.earthengine.google.com。
-它在 `Export` 之前會先印出六項檢查（影像數量、數值範圍、覆蓋率、都市熱島、
-分布形狀、網格點數），每項都寫了合格標準。**六項都合格再去 Tasks 分頁按 RUN** ——
-匯出要跑十幾二十分鐘，先驗完可以省掉一輪來回。
+#### 換上真資料的完整流程
 
-其中最重要的是**檢查 4 都市熱島**：台北車站要明顯比陽明山熱 5 度以上。
-如果市區反而比山區涼，資料就是壞的，不要匯出。
+三支腳本走的都是現有的 GeoJSON pipeline，**不需要架 COG tile server**：
 
-**步驟二：匯出後驗證檔案，通過才安裝。**
+| 檔案 | 範圍與間距 | 產出 |
+| --- | --- | --- |
+| `tools/earthengine_lst_export.js` | 大台北 100m | 約 64,000 點，街道級對比 |
+| `tools/earthengine_taiwan_grid_export.js` | 全台本島 1km | 約 36,000 點，區域級覆蓋 |
+| `tools/merge_lst_grids.js` | — | 把兩份合成雙解析度網格 |
+
+只想先讓 Demo 路線有真資料的話，跑第一支就夠了。
+
+**步驟一：在 EE Code Editor 跑腳本，先看檢查再匯出。**
+
+把腳本貼到 https://code.earthengine.google.com（右上角要選到已註冊的 Cloud
+project）。兩支都會在 `Export` 之前印出檢查項目，每項都寫了合格標準。
+**全部合格再去 Tasks 分頁按 RUN** —— 匯出要跑十幾二十分鐘，先驗完省一輪來回。
+
+最重要的是**都市熱島那項**：台北車站要明顯比陽明山熱 5 度以上（全台版是
+西部城市要比中央山脈熱 8 度以上）。如果市區反而比山區涼，資料就是壞的，不要匯出。
+
+大台北腳本頂端的 `SCALE` 預設 `100`（Landsat ST_B10 原生解析度）。
+TA 是行人與機車騎士，他們走平面道路，需要 100m 才分辨得出有行道樹與無遮蔽的路廊；
+`200` 只能分辨市區 vs 山區這種區域尺度。
+
+**步驟二：合併與驗證，通過才安裝。**
 
 ```bash
-node tools/verify_lst_grid.js ~/Downloads/taipei_lst_grid.geojson
-node tools/verify_lst_grid.js ~/Downloads/taipei_lst_grid.geojson --install
-cd functions && npm test
+# 兩份都有
+node tools/merge_lst_grids.js ~/Downloads/taipei_lst_grid.geojson \
+                              ~/Downloads/taiwan_lst_grid.geojson --install
+
+# 只有大台北那份
+node tools/merge_lst_grids.js ~/Downloads/taipei_lst_grid.geojson --install
+
+# 安裝後一定要再驗一次
+node tools/verify_lst_grid.js public/data/taipei_lst_grid.geojson
+npm test
+```
+
+`merge_lst_grids.js` 會擋掉兩種最常見的靜默錯誤：拿到的其實是佔位資料、
+以及忘了把克氏溫度減 273.15。不加 `--install` 只會寫出 `merged_lst_grid.geojson`
+讓你先檢查。
+
+**步驟三：部署。資料在 `public/data/` 與 `functions/data/` 各一份，兩邊都要上。**
+
+```bash
+npm run deploy
 ```
 
 驗證器檢查十項，重點是那些**安靜壞掉**的失敗模式 —— 經緯度顛倒、忘了減 273.15、
@@ -146,12 +182,17 @@ cd functions && npm test
 
 ### 3. 部署
 
+完整步驟見 **[DEPLOY.md](DEPLOY.md)**（建專案 → Blaze → 啟用 API → 建兩把 key
+→ Firestore → 部署 → 驗證）。已經設定好的話：
+
 ```bash
-npm install -g firebase-tools
-firebase login
-cd functions && npm install && cd ..
-firebase deploy
+npm run deploy      # 先跑 preflight，沒過就不部署
 ```
+
+⚠️ 前端 `public/config.js` 的 key 與後端 `functions/.env` 的 key **必須是不同兩把**：
+前端那把會公開在網頁原始碼裡，只能開 Maps JavaScript API / Places API 並設
+HTTP referrer 限制；能打 Routes API 的那把只放後端。本機開發為了方便是共用同一把
+（`tools/dev_server.js` 會注入），正式環境不可沿用。
 
 ---
 
@@ -210,9 +251,14 @@ firebase emulators:start --only functions,hosting
 ### `GET|POST /api/coolRoute`
 
 `origin`、`destination` 可填 `lat,lng` 座標，也可直接填地名或地址（交給 Routes API
-地理編碼，`regionCode=TW` 偏向台灣）；`mode` 支援 `driving` / `scooter` /
-`walking` / `bicycling`（API 預設 `driving`；前端 TA 是行人與機車騎士，
-預設 `scooter`，機車以汽車路線近似）。回應的 `query.resolved` 會回填實際
+地理編碼，`regionCode=TW` 偏向台灣）；`mode` 支援 `driving` / `scooter`（= `motorcycle`）/ `walking` / `bicycling`
+（API 預設 `driving`；前端 TA 是行人與機車騎士，預設 `scooter`）。
+
+機車走 Routes API 的 **`TWO_WHEELER`**，不是 DRIVE 的近似 —— 它會自動排除
+國道（機車本來就不能上），時間與距離也和 DRIVE 明顯不同。用 DRIVE 會推薦
+機車不能走的路線，這是曾經修過的 bug，`coolRoute.test.js` 有迴歸測試守著。
+DRIVE 與 TWO_WHEELER 都帶 `routingPreference: TRAFFIC_AWARE`，時間才對得上
+Google Maps 顯示的值（代價是計費 SKU 較高）。回應的 `query.resolved` 會回填實際
 起訖座標，前端拿它更新環境風險列。
 
 回傳是帶 `meta` 的物件而非裸陣列（`routes` 欄位才是 `RouteOption[]`），
