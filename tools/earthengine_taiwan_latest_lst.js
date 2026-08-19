@@ -65,7 +65,7 @@ Map.addLayer(output.select('LST'), {
   min: 18,
   max: 48,
   palette: ['#2c7bb6', '#abd9e9', '#ffffbf', '#fdae61', '#d7191c']
-}, '最新可用 LST（非即時）');
+}, '最新可用 LST');
 Map.addLayer(output.select('age_days'), {
   min: 0,
   max: lookbackDays,

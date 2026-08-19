@@ -18,6 +18,13 @@ const COLOR_STOPS = [
   { t: 40, c: [0xfd, 0xae, 0x61] },
   { t: 44, c: [0xd7, 0x19, 0x1c] },
 ];
+const LATEST_COLOR_STOPS = [
+  { t: 18, c: [0x2c, 0x7b, 0xb6] },
+  { t: 30, c: [0xab, 0xd9, 0xe9] },
+  { t: 40, c: [0xff, 0xff, 0xbf] },
+  { t: 50, c: [0xfd, 0xae, 0x61] },
+  { t: 60, c: [0xd7, 0x19, 0x1c] },
+];
 
 const MAX_CIRCLES = 2000; // 一次最多渲染 2000 點，超過依比例抽樣
 const MIN_ROUTE_COVERAGE = 0.8;
@@ -64,6 +71,12 @@ function setStatus(msg, isError) {
 function updateDataQuality() {
   const notices = [];
   if (state.gridMeta?.placeholder) notices.push('溫度：全台合成示範資料，非 Landsat 觀測');
+  else if (
+    state.gridMeta?.source === 'LANDSAT_8_9_LATEST_AVAILABLE' &&
+    Number.isFinite(state.gridMeta.maxAgeDays)
+  ) {
+    notices.push(`Landsat：最舊像元距今 ${state.gridMeta.maxAgeDays} 天`);
+  }
 
   const meta = state.risk?.meta || {};
   const defaults = meta.usedDefaults || [];
@@ -81,7 +94,10 @@ function updateDataQuality() {
 /* ────────────────────────── A1 地圖與熱區圖層 ────────────────────────── */
 
 function tempToColor(t) {
-  const stops = COLOR_STOPS;
+  const stops =
+    state.gridMeta?.source === 'LANDSAT_8_9_LATEST_AVAILABLE'
+      ? LATEST_COLOR_STOPS
+      : COLOR_STOPS;
   if (t <= stops[0].t) return rgb(stops[0].c);
   if (t >= stops[stops.length - 1].t) return rgb(stops[stops.length - 1].c);
 
@@ -112,7 +128,8 @@ async function loadGrid() {
         const [lng, lat] = g.coordinates; // GeoJSON 是 [lng, lat]
         const p = f.properties || {};
         const t = p.LST ?? p.lst ?? p.ST_B10 ?? p.mean;
-        return typeof t === 'number' ? { lat, lng, t } : null;
+        const ageDays = p.age_days ?? p.ageDays ?? null;
+        return typeof t === 'number' ? { lat, lng, t, ageDays } : null;
       })
       .filter(Boolean);
 
@@ -120,6 +137,9 @@ async function loadGrid() {
     const lngs = state.grid.map((p) => p.lng);
     state.gridMeta = {
       placeholder: gj._placeholder === true,
+      source: gj._source || (gj._placeholder === true ? 'PLACEHOLDER_SYNTHETIC' : null),
+      minAgeDays: Number.isFinite(Number(gj._minAgeDays)) ? Number(gj._minAgeDays) : null,
+      maxAgeDays: Number.isFinite(Number(gj._maxAgeDays)) ? Number(gj._maxAgeDays) : null,
       detailBbox: gj._detailBbox || null, // 高解析區，圓點畫小顆
       bounds: state.grid.length
         ? {
@@ -131,15 +151,33 @@ async function loadGrid() {
         : null,
     };
 
+    const latest = state.gridMeta.source === 'LANDSAT_8_9_LATEST_AVAILABLE';
     $('legendTitle').textContent = state.gridMeta.placeholder
       ? '示範地表溫度（°C）'
-      : 'Landsat 地表溫度（°C）';
+      : latest
+        ? '最新可用地表溫度（°C）'
+        : 'Landsat 地表溫度（°C）';
     $('legendSource').textContent = state.gridMeta.placeholder
       ? '合成網格｜非 Landsat、非即時資料'
-      : 'Landsat 8/9 ST_B10｜衛星過境觀測，非即時資料';
+      : latest
+        ? `Landsat 8/9｜像元距今 ${state.gridMeta.minAgeDays}–${state.gridMeta.maxAgeDays} 天`
+        : 'Landsat 8/9 ST_B10｜衛星過境觀測，非即時資料';
     $('legendScope').textContent = state.gridMeta.placeholder
       ? '全台示範網格｜大台北高解析'
-      : '';
+      : latest
+        ? '全台約 1km｜大台北約 100m'
+        : '';
+    const tickValues = latest ? [18, 30, 45, 60] : [26, 32, 38, 44];
+    document.querySelectorAll('.legend-ticks span').forEach((el, index) => {
+      el.textContent = tickValues[index];
+    });
+    const sourceNote = $('lstSourceNote');
+    if (sourceNote && latest) {
+      sourceNote.textContent =
+        `地表溫度：Landsat 逐像元最新晴空觀測；` +
+        `本批像元距今 ${state.gridMeta.minAgeDays}–${state.gridMeta.maxAgeDays} 天，並非即時溫度。` +
+        `地表溫度是太陽直射下路面、屋頂等表面的溫度，通常明顯高於氣溫。`;
+    }
     updateDataQuality();
 
     console.log(`[heat] 載入 ${state.grid.length} 個網格點`);
@@ -172,15 +210,16 @@ function renderHeatLayer() {
   const drawn = [];
   for (let i = 0; i < visible.length; i += step) drawn.push(visible[i]);
 
-  // 高解析區（200m 網格）畫小顆，全台粗網格（1.1km）畫大顆才不會滿地空隙
+  // 高解析區（100/200m 網格）畫小顆，全台粗網格（約 1km）畫大顆才不會滿地空隙
   // 半徑隨網格間距與抽樣比例縮放：每畫 1 點代表 step 個點的面積，
   // 縮到全台視野時圓點放大成連續熱區面，放大到街區時縮回網格原尺度
   const db = state.gridMeta?.detailBbox;
   const inDetail = (p) =>
     db && p.lat >= db.south && p.lat <= db.north && p.lng >= db.west && p.lng <= db.east;
   const scale = Math.sqrt(step);
+  const detailMeters = state.gridMeta?.source === 'LANDSAT_8_9_LATEST_AVAILABLE' ? 100 : 200;
   const radiusOf = (p) =>
-    Math.min(4000, Math.max(100, 0.6 * (!db || inDetail(p) ? 200 : 1100) * scale));
+    Math.min(4000, Math.max(75, 0.6 * (!db || inDetail(p) ? detailMeters : 1000) * scale));
   const opacityOf = (p) => (!db || inDetail(p) ? 0.45 : 0.3); // 粗網格重疊多，畫淡一點
 
   // 物件池：有幾個畫幾個，多的收起來
@@ -466,7 +505,7 @@ function renderCards(data) {
         </div>
       </div>
       ${note}
-      <div class="card-samples">沿線取樣 ${r.samplePoints} 點｜溫度覆蓋 ${coveragePct}%｜非即時溫度</div>
+      <div class="card-samples">沿線取樣 ${r.samplePoints} 點｜溫度覆蓋 ${coveragePct}%｜</div>
     `;
 
     // A3 交棒 Google Maps —— 產品定位的體現，按鈕文案不要改

@@ -37,6 +37,7 @@ GET /api/coolRoute?origin=24.9874,121.5759&destination=25.0488,121.5137&mode=dri
     ├── earthengine_lst_export.js         # EE：大台北 100m（含匯出前六項檢查）
     ├── earthengine_taiwan_grid_export.js # EE：全台本島 1km
     ├── earthengine_taiwan_latest_lst.js  # EE：全台「最新可用」觀測，輸出 GeoTIFF
+    ├── import_latest_lst_cog.js           # COG → 現有網站雙解析度 GeoJSON
     ├── merge_lst_grids.js                # 合併兩份匯出 → 雙解析度網格
     ├── verify_lst_grid.js                # 驗證 + 安裝到兩個 data 目錄
     └── make_placeholder_grid.js          # 產生佔位網格用
@@ -103,8 +104,20 @@ Landsat 不能提供真正即時溫度。Landsat 8 與 9 合併後名義重訪�
 `tools/earthengine_taiwan_latest_lst.js` 會從最近 48 天的 Landsat 8/9 Level-2
 資料中，逐像元選最新一筆無雲 `ST_B10`，並輸出 `LST` 與 `age_days` 兩個 band。
 
+從 Drive／Cloud Storage 下載 COG 後，可直接匯入目前網站：
+
+```bash
+npm run lst:import-cog -- ~/Downloads/taiwan_latest_landsat_lst.tif --install
+node tools/verify_lst_grid.js public/data/taipei_lst_grid.geojson
+npm test
+```
+
+匯入工具會保留大台北約 100m，其他區域降採樣為約 1km，並把每個點的
+`age_days` 一起同步安裝到 `public/data/` 與 `functions/data/`。API、圖例與 Agent
+會依 `_source: LANDSAT_8_9_LATEST_AVAILABLE` 自動改用「最新可用、非即時」文案。
+
 全台資料不要匯出成 GeoJSON：100m 網格會有數百萬像元，瀏覽器無法一次載入。
-建議架構：
+若要保留全台 100m、不做雙解析度降採樣，建議正式架構：
 
 1. Earth Engine 每日排程產生 Cloud Optimized GeoTIFF（COG）。
 2. 地圖圖層使用 Earth Engine Map ID 或 COG tile server，以 `{z}/{x}/{y}` 圖磚載入。

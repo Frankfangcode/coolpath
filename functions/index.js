@@ -168,6 +168,8 @@ function scoreRoute(route, travelMode) {
     distanceM: Math.round(route.distanceMeters || geo.pathLengthM(points)),
     heatScore: heat.avg, // 沿線平均地表溫度 °C
     maxSurfaceTemp: heat.max,
+    avgObservationAgeDays: heat.avgAgeDays,
+    maxObservationAgeDays: heat.maxAgeDays,
     samplePoints: heat.samplePoints, // 取樣點數，展示可信度用
     label: null,
     mapsUrl: buildMapsUrl(points, travelMode),
@@ -245,6 +247,7 @@ exports.coolRoute = onRequest({ cors: true }, async (req, res) => {
           summary: `最涼路線多花 ${extraMin} 分鐘，沿線平均地表溫度低 ${tempDelta} 度`,
         };
 
+    const lstInfo = lst.datasetInfo();
     return sendJson(res, 200, {
       ok: true,
       query: {
@@ -256,10 +259,9 @@ exports.coolRoute = onRequest({ cors: true }, async (req, res) => {
         resolved: { origin: fastest.start, destination: fastest.end },
       },
       meta: {
-        lstSource: lst.source(),
-        lstLabel: '夏季平均地表溫度（Landsat 8/9 熱紅外，100m 網格，2023–2026 夏季中位數）',
-        lstDisclaimer:
-          '非即時溫度。Landsat 過境時間約上午 10:30，代表上午時段。可比較不同路廊，不可分辨同一條路的兩側。',
+        lstSource: lstInfo.source,
+        lstLabel: lstInfo.label,
+        lstDisclaimer: lstInfo.disclaimer,
         sampleIntervalM: SAMPLE_INTERVAL_M,
         routeCount: routes.length,
         sameRouteIsBoth: sameRoute,
@@ -289,7 +291,9 @@ exports.assessRisk = onRequest({ cors: true }, async (req, res) => {
   const lng = Number(p.lng ?? 121.5137);
   const maxSurfaceTemp = p.maxSurfaceTemp !== undefined ? Number(p.maxSurfaceTemp) : undefined;
 
-  const surfaceTemp = lst.lookupSurfaceTemp(lat, lng);
+  const surfaceObservation = lst.lookupSurfaceObservation(lat, lng);
+  const surfaceTemp = surfaceObservation?.temp ?? null;
+  const surfaceTempAgeDays = surfaceObservation?.ageDays ?? null;
   const degraded = [];
 
   // 三支外部 API 各自獨立降級，一支掛掉不影響另一支
@@ -375,6 +379,7 @@ exports.assessRisk = onRequest({ cors: true }, async (req, res) => {
     humidity: weather.humidity,
     uvi: uviData.uvi,
     surfaceTemp: surfaceTemp === null ? null : round1(surfaceTemp),
+    surfaceTempAgeDays,
     dataTime,
     meta: {
       lat,
@@ -386,7 +391,7 @@ exports.assessRisk = onRequest({ cors: true }, async (req, res) => {
       feelsLikeTime: forecastFeels ? forecastFeels.forecastTime : null,
       uviSite: uviData.uviSite,
       uviNote: '就近環境部測站即時值，單站代表一片區域，不隨路線位置變化，不參與路線評分',
-      surfaceTempNote: '該點夏季平均地表溫度，非即時溫度',
+      surfaceTempNote: lst.datasetInfo().surfaceTempNote,
       lstSource: lst.source(),
       degraded, // 這次抓失敗的來源
       usedCache: degraded.length > 0 && cached !== null,

@@ -23,21 +23,30 @@ const SYSTEM_PROMPT = `你是「涼路 CoolPath」的決策代理人，服務對
    level 為 medium 或 high 時 shouldNotify 為 true。
 7. speech 是口語化短句，30 字內，數字一律用國字（「四十二度」而非「42度」，避免 TTS 讀錯）。
 8. 若提到補水，只能建議白開水或電解質飲料，絕不可提到含糖飲料或其他飲品。
-9. 地表溫度是「夏季平均地表溫度」，是氣候常態值。
-   絕不可說成「現在的溫度」「即時溫度」「這條路現在幾度」。
-   要講的話就講「沿線平均地表溫度」。
+9. 地表溫度可能是「夏季平均」或「最新可用晴空衛星觀測」，必須依輸入文字描述。
+   兩者都絕不可說成「現在的溫度」「即時溫度」「這條路現在幾度」。
+   最新可用觀測的不同像元可能來自不同日期，必須保留觀測年齡資訊。
 10. 只講一件事。不要把所有指標都唸一遍。`;
 
 function buildUserPrompt(risk, routes) {
   const coolest = routes.find((r) => r.label === 'coolest');
   const fastest = routes.find((r) => r.label === 'fastest');
+  const hasNumber = (value) => value !== null && value !== undefined && Number.isFinite(Number(value));
+  const latestObservation =
+    hasNumber(risk.surfaceTempAgeDays) || routes.some((r) => hasNumber(r.maxObservationAgeDays));
+  const tempNature = latestObservation
+    ? '最新可用晴空衛星地表溫度（非即時；不同像元可能來自不同日期）'
+    : '夏季平均地表溫度（非即時；氣候常態值）';
 
   const lines = [
     '【環境狀況】',
     `氣溫 ${risk.airTemp}°C，相對濕度 ${risk.humidity}%，體感溫度（Heat Index）${risk.feelsLike}°C`,
     `紫外線指數 UVI ${risk.uvi}（台北市測站，城市級數值，與路線無關）`,
     risk.surfaceTemp !== null && risk.surfaceTemp !== undefined
-      ? `目的地夏季平均地表溫度 ${risk.surfaceTemp}°C`
+      ? `目的地${tempNature} ${risk.surfaceTemp}°C` +
+        (hasNumber(risk.surfaceTempAgeDays)
+          ? `，觀測距今 ${risk.surfaceTempAgeDays} 天`
+          : '')
       : null,
     `規則判定風險等級：${risk.level}`,
     '',
@@ -45,9 +54,13 @@ function buildUserPrompt(risk, routes) {
   ];
 
   for (const r of routes) {
+    const age = hasNumber(r.maxObservationAgeDays)
+      ? `、沿線最舊像元距今 ${r.maxObservationAgeDays} 天`
+      : '';
     lines.push(
       `- ${r.label}：${Math.round(r.durationSec / 60)} 分鐘、${(r.distanceM / 1000).toFixed(1)} 公里、` +
-        `沿線平均地表溫度 ${r.heatScore}°C、最高路段 ${r.maxSurfaceTemp}°C（${r.samplePoints} 個取樣點）`
+        `沿線平均地表溫度 ${r.heatScore}°C、最高路段 ${r.maxSurfaceTemp}°C` +
+        `${age}（${r.samplePoints} 個取樣點）`
     );
   }
 

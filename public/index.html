@@ -63,7 +63,7 @@
     <span id="modeHint" class="mode-hint">走機車路網、自動避開國道，時間含即時路況</span>
     <div class="route-actions">
       <button id="planBtn" class="btn btn-search">🍃 尋找涼爽路線</button>
-      <button id="demoBtn" class="btn-link">✨ 一鍵示範</button>
+      <button id="demoBtn" class="btn-link"> gemini分析建議 </button>
     </div>
   </section>
 </div>
@@ -106,6 +106,7 @@
     <div id="mapCoverageNotice" class="map-coverage-notice hidden">目前視野沒有溫度資料</div>
     <div class="legend">
       <div class="legend-title" id="legendTitle">地表溫度（°C）</div>
+      <div class="legend-note">路面、屋頂等表面的溫度，<strong>不是氣溫</strong>；盛夏日照下可達 60°C 以上</div>
       <div class="legend-scale">
         <span class="legend-swatch" style="background:#2c7bb6"></span>
         <span class="legend-swatch" style="background:#abd9e9"></span>
@@ -148,7 +149,7 @@
   <footer id="sources" class="footer">
     <p><strong>資料來源</strong></p>
     <ul>
-      <li>地表溫度：目前為全台合成示範網格（本島 1.1km、大台北 200m）。換成 Landsat 8/9 ST_B10 後仍屬衛星過境觀測或期間合成，並非即時溫度。</li>
+      <li id="lstSourceNote">地表溫度：資料載入中；Landsat 衛星過境觀測溫度。地表溫度是太陽直射下路面、屋頂等表面的溫度，通常明顯高於氣溫。</li>
       <li>氣溫與相對濕度：中央氣象署自動氣象站觀測資料。</li>
       <li>紫外線指數：環境部有發布觀測時使用測站值；無資料時介面會明確標示快取或預設值。UVI 為城市級單一數值，不參與路線溫度評分。</li>
     </ul>

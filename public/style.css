@@ -305,6 +305,8 @@ html, body {
   max-width: 190px;
 }
 .legend-title { font-size: 12px; font-weight: 800; margin-bottom: 6px; }
+.legend-note { color: var(--amber); line-height: 1.4; margin: -3px 0 6px; }
+.legend-note strong { font-weight: 800; }
 .legend-scale { display: flex; height: 8px; border-radius: 4px; overflow: hidden; }
 .legend-swatch { flex: 1; }
 .legend-ticks { display: flex; justify-content: space-between; color: var(--muted); margin-top: 3px; font-variant-numeric: tabular-nums; }

@@ -30,6 +30,7 @@ const inputPath = args.find((a) => !a.startsWith('--')) || TARGETS[1];
 
 // Earth Engine 腳本裡的 bbox
 const BBOX = { west: 121.45, south: 24.95, east: 121.67, north: 25.21 };
+const TAIWAN_BBOX = { west: 118.0, south: 21.7, east: 122.2, north: 26.6 };
 
 let failed = 0;
 let warned = 0;
@@ -73,6 +74,9 @@ if (gj.type !== 'FeatureCollection') {
 }
 
 const features = Array.isArray(gj.features) ? gj.features : [];
+const isLatest = gj._source === 'LANDSAT_8_9_LATEST_AVAILABLE';
+const hasNationalGrid = Boolean(gj._detailBbox);
+const expectedBounds = hasNationalGrid ? TAIWAN_BBOX : BBOX;
 
 if (gj._placeholder === true) {
   fail(
@@ -83,6 +87,7 @@ if (gj._placeholder === true) {
 } else {
   ok('沒有佔位標記，看起來是真的匯出檔');
 }
+if (gj._source) ok('資料來源標記', gj._source);
 
 /* ────────────────────────── 點數 ────────────────────────── */
 
@@ -117,6 +122,7 @@ console.log('\n── 溫度欄位 ──');
 const TEMP_KEYS = ['LST', 'lst', 'ST_B10', 'mean', 'median', 'b1', 'temp'];
 const propKeys = Object.keys(features[0].properties || {});
 const tempKey = TEMP_KEYS.find((k) => propKeys.includes(k));
+const ageKey = ['age_days', 'ageDays'].find((k) => propKeys.includes(k));
 
 if (!tempKey) {
   fail(
@@ -130,12 +136,18 @@ if (!tempKey) {
   warn(`溫度欄位是 ${tempKey} 而不是 LST`, 'lst.js 讀得到，但建議在 EE 腳本加 .rename("LST")');
 }
 
+if (isLatest && !ageKey) {
+  fail('最新觀測資料缺少 age_days', '', 'COG 的 Band 2 必須是 age_days');
+} else if (ageKey) {
+  ok('觀測年齡欄位是 age_days');
+}
+
 /* ────────────────────────── 座標 ────────────────────────── */
 
 console.log('\n── 座標（GeoJSON 是 [lng, lat]，這是最常出錯的地方）──');
 
 let badGeom = 0;
-let outOfBox = 0;
+let outOfBounds = 0;
 let swapped = 0;
 const pts = [];
 
@@ -152,11 +164,17 @@ for (const f of features) {
   }
   // 顛倒的話 lat 會落在 121 附近、lng 落在 25 附近
   if (lat > 100 && lng < 100) swapped++;
-  if (lng < BBOX.west - 0.05 || lng > BBOX.east + 0.05 || lat < BBOX.south - 0.05 || lat > BBOX.north + 0.05) {
-    outOfBox++;
+  if (
+    lng < expectedBounds.west ||
+    lng > expectedBounds.east ||
+    lat < expectedBounds.south ||
+    lat > expectedBounds.north
+  ) {
+    outOfBounds++;
   }
   const t = tempKey ? f.properties[tempKey] : null;
-  if (typeof t === 'number') pts.push({ lat, lng, t });
+  const ageDays = ageKey ? f.properties[ageKey] : null;
+  if (typeof t === 'number') pts.push({ lat, lng, t, ageDays });
 }
 
 if (badGeom > 0) warn(`${badGeom} 筆 geometry 無效`, '已略過');
@@ -172,12 +190,16 @@ if (swapped > 0) {
   ok('座標順序正確（[lng, lat]）');
 }
 
-if (outOfBox > features.length * 0.02) {
-  fail(`${outOfBox} 筆落在台北 bbox 外`, '', 'EE 腳本的 taipei Rectangle 可能被改過');
-} else if (outOfBox > 0) {
-  warn(`${outOfBox} 筆略微超出 bbox`, '邊界效應，可接受');
+if (outOfBounds > features.length * 0.02) {
+  fail(
+    `${outOfBounds} 筆落在${hasNationalGrid ? '台灣' : '台北'}合理範圍外`,
+    '',
+    '確認 raster/GeoJSON 的座標系統是 EPSG:4326 且座標順序為 [lng, lat]'
+  );
+} else if (outOfBounds > 0) {
+  warn(`${outOfBounds} 筆略微超出合理範圍`, '邊界效應，可接受');
 } else {
-  ok('全部落在台北 bbox 內');
+  ok(`全部落在${hasNationalGrid ? '台灣' : '台北'}合理範圍內`);
 }
 
 const lats = pts.map((p) => p.lat);
@@ -208,8 +230,14 @@ if (temps.length === 0) {
       '',
       'EE 腳本忘了 .subtract(273.15)'
     );
-  } else if (max > 60) {
+  } else if (isLatest && max > 70) {
     fail(`最高 ${max.toFixed(1)}°C，過高`, '', '可能混到未遮罩的雲或縮放係數用錯');
+  } else if (!isLatest && max > 60) {
+    fail(`最高 ${max.toFixed(1)}°C，過高`, '', '可能混到未遮罩的雲或縮放係數用錯');
+  } else if (isLatest && min < 0) {
+    fail(`最低 ${min.toFixed(1)}°C，不合理`, '', '可能有殘留雲影；重新匯入時應排除負值');
+  } else if (isLatest) {
+    ok(`範圍 ${min.toFixed(1)}–${max.toFixed(1)}°C`, '單次晴空地表觀測容許比期間中位數更極端');
   } else if (min < 10) {
     warn(`最低 ${min.toFixed(1)}°C，偏低`, '可能有殘留的雲影未被遮掉');
   } else if (min < 20 || max < 38) {
@@ -224,8 +252,24 @@ if (temps.length === 0) {
       `p95 ${q(0.95).toFixed(1)}　平均 ${mean.toFixed(1)}`
   );
 
-  if (mean < 28 || mean > 42) {
+  if (!isLatest && (mean < 28 || mean > 42)) {
     warn(`平均 ${mean.toFixed(1)}°C 偏離夏季台北的合理區間`, '預期約 32–38°C');
+  }
+}
+
+if (isLatest) {
+  console.log('\n── 觀測年齡 ──');
+  const validAges = pts
+    .map((p) => Number(p.ageDays))
+    .filter((age) => Number.isFinite(age) && age >= 0)
+    .sort((a, b) => a - b);
+  if (validAges.length !== pts.length) {
+    fail(`${pts.length - validAges.length} 筆 age_days 無效`, '', '重新執行 COG 匯入工具');
+  } else {
+    const minAge = validAges[0];
+    const maxAge = validAges[validAges.length - 1];
+    ok(`範圍 ${minAge.toFixed(1)}–${maxAge.toFixed(1)} 天`, '不同像元可來自不同過境日期');
+    if (maxAge > 60) warn('最舊像元超過 60 天', '增加 Earth Engine lookbackDays 或檢查雲遮罩覆蓋');
   }
 }
 

@@ -250,7 +250,8 @@ t('補水建議只提白開水或電解質飲料', () => {
 
 t('system prompt 有把誠實性守則寫進去', () => {
   const p = agent.SYSTEM_PROMPT;
-  assert.ok(p.includes('夏季平均地表溫度'), '缺少地表溫度性質說明');
+  assert.ok(p.includes('夏季平均'), '缺少夏季平均地表溫度性質說明');
+  assert.ok(p.includes('最新可用晴空衛星觀測'), '缺少最新觀測資料性質說明');
   assert.ok(p.includes('即時'), '缺少「不可宣稱即時」的規則');
   assert.ok(p.includes('白開水') && p.includes('電解質'), '缺少補水限制');
   assert.ok(p.includes('shouldNotify'), '缺少不打擾規則');
@@ -304,6 +305,17 @@ t('prompt 帶入實際數值，模型才有東西可以引用', () => {
 t('prompt 標明 UVI 與路線無關', () => {
   const p = agent.buildUserPrompt(sampleRisk, sampleRoutes);
   assert.ok(/城市級/.test(p));
+});
+
+t('prompt 對最新觀測保留 age_days 且不宣稱即時', () => {
+  const p = agent.buildUserPrompt(
+    { ...sampleRisk, surfaceTempAgeDays: 15.4 },
+    sampleRoutes.map((route) => ({ ...route, maxObservationAgeDays: 18.2 }))
+  );
+  assert.ok(p.includes('最新可用晴空衛星'));
+  assert.ok(p.includes('觀測距今 15.4 天'));
+  assert.ok(p.includes('沿線最舊像元距今 18.2 天'));
+  assert.ok(p.includes('非即時'));
 });
 
 (async () => {

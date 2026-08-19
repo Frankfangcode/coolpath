@@ -1,12 +1,8 @@
 /**
- * lst.js — 夏季平均地表溫度（LST）查詢共用模組
+ * lst.js — Landsat 地表溫度（LST）查詢共用模組
  *
- * 資料來源：Landsat 8/9 熱紅外 ST_B10，2023–2026 夏季（6–9 月）影像中位數，
- *          Earth Engine 以 200m sample 匯出成點網格。原生解析度 100m。
- *
- * 誠實性：這是「夏季平均地表溫度」，不是即時氣溫，也不是現在的溫度。
- *        Landsat 過境時間約上午 10:30，代表上午時段。
- *        可比較不同路廊，不可宣稱能分辨同一條路的兩側。
+ * 支援兩種資料：夏季多期中位數，以及最近 48 天逐像元最新晴空觀測。
+ * 兩者都不是即時氣溫；最新觀測的不同像元也可能來自不同日期。
  *
  * GeoJSON 座標順序是 [lng, lat]，不是 [lat, lng]。搞反的話全部查詢會回 null。
  */
@@ -25,8 +21,17 @@ const MAX_DIST_M = 800;
 // 溫度可能的欄位名（Earth Engine rename 過是 LST，沒 rename 是 ST_B10）
 const TEMP_KEYS = ['LST', 'lst', 'ST_B10', 'mean', 'median', 'b1', 'temp'];
 
-let index = null; // Map<cellKey, Array<[lat, lng, temp]>>
-let meta = { loaded: false, placeholder: false, points: 0, error: null };
+let index = null; // Map<cellKey, Array<[lat, lng, temp, ageDays]>>
+let meta = {
+  loaded: false,
+  placeholder: false,
+  source: null,
+  generatedAt: null,
+  minAgeDays: null,
+  maxAgeDays: null,
+  points: 0,
+  error: null,
+};
 const memo = new Map(); // 取樣點常常落在同一格，快取省掉重複的最近鄰搜尋
 const MEMO_LIMIT = 200000;
 
@@ -47,6 +52,11 @@ function pickTemp(props) {
   return null;
 }
 
+function pickAgeDays(props) {
+  const value = Number(props?.age_days ?? props?.ageDays);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
 function load() {
   if (index) return;
   index = new Map();
@@ -54,6 +64,10 @@ function load() {
     const raw = fs.readFileSync(GEOJSON_PATH, 'utf8');
     const gj = JSON.parse(raw);
     meta.placeholder = gj._placeholder === true;
+    meta.source = gj._source || null;
+    meta.generatedAt = gj._generatedAt || null;
+    meta.minAgeDays = Number.isFinite(Number(gj._minAgeDays)) ? Number(gj._minAgeDays) : null;
+    meta.maxAgeDays = Number.isFinite(Number(gj._maxAgeDays)) ? Number(gj._maxAgeDays) : null;
 
     for (const f of gj.features || []) {
       const g = f && f.geometry;
@@ -62,11 +76,12 @@ function load() {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
       const temp = pickTemp(f.properties);
       if (temp === null) continue;
+      const ageDays = pickAgeDays(f.properties);
 
       const key = cellKey(lat, lng);
       let bucket = index.get(key);
       if (!bucket) index.set(key, (bucket = []));
-      bucket.push([lat, lng, temp]);
+      bucket.push([lat, lng, temp, ageDays]);
       meta.points++;
     }
     meta.loaded = true;
@@ -92,12 +107,12 @@ function distM(aLat, aLng, bLat, bLng) {
 }
 
 /**
- * 查詢某點的夏季平均地表溫度。
+ * 查詢某點最近網格觀測，包含溫度與像元觀測年齡。
  * @param {number} lat
  * @param {number} lng
- * @returns {number|null} °C，最近網格點超過 500m 或無資料時回 null
+ * @returns {{temp:number,ageDays:number|null,distanceM:number}|null}
  */
-function lookupSurfaceTemp(lat, lng) {
+function lookupSurfaceObservation(lat, lng) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   load();
   if (!meta.loaded) return null;
@@ -115,11 +130,11 @@ function lookupSurfaceTemp(lat, lng) {
     for (let dj = -1; dj <= 1; dj++) {
       const bucket = index.get(`${ci + di}:${cj + dj}`);
       if (!bucket) continue;
-      for (const [pLat, pLng, temp] of bucket) {
+      for (const [pLat, pLng, temp, ageDays] of bucket) {
         const d = distM(lat, lng, pLat, pLng);
         if (d < bestD) {
           bestD = d;
-          best = temp;
+          best = { temp, ageDays, distanceM: Math.round(d) };
         }
       }
     }
@@ -128,6 +143,11 @@ function lookupSurfaceTemp(lat, lng) {
   const result = bestD <= MAX_DIST_M ? best : null;
   if (memo.size < MEMO_LIMIT) memo.set(mk, result);
   return result;
+}
+
+/** 相容既有呼叫端：只取攝氏地表溫度。 */
+function lookupSurfaceTemp(lat, lng) {
+  return lookupSurfaceObservation(lat, lng)?.temp ?? null;
 }
 
 /**
@@ -139,23 +159,42 @@ function summarize(points) {
   let hit = 0;
   let max = -Infinity;
   let min = Infinity;
+  let ageSum = 0;
+  let ageHit = 0;
+  let maxAgeDays = -Infinity;
 
   for (const p of points) {
-    const t = lookupSurfaceTemp(p.lat, p.lng);
-    if (t === null) continue;
+    const observation = lookupSurfaceObservation(p.lat, p.lng);
+    if (!observation) continue;
+    const t = observation.temp;
     sum += t;
     hit++;
     if (t > max) max = t;
     if (t < min) min = t;
+    if (observation.ageDays !== null) {
+      ageSum += observation.ageDays;
+      ageHit++;
+      if (observation.ageDays > maxAgeDays) maxAgeDays = observation.ageDays;
+    }
   }
 
   if (hit === 0) {
-    return { avg: null, max: null, min: null, samplePoints: points.length, coveredPoints: 0 };
+    return {
+      avg: null,
+      max: null,
+      min: null,
+      avgAgeDays: null,
+      maxAgeDays: null,
+      samplePoints: points.length,
+      coveredPoints: 0,
+    };
   }
   return {
     avg: Math.round((sum / hit) * 10) / 10,
     max: Math.round(max * 10) / 10,
     min: Math.round(min * 10) / 10,
+    avgAgeDays: ageHit ? Math.round((ageSum / ageHit) * 10) / 10 : null,
+    maxAgeDays: ageHit ? Math.round(maxAgeDays * 10) / 10 : null,
     samplePoints: points.length,
     coveredPoints: hit,
   };
@@ -165,7 +204,39 @@ function summarize(points) {
 function source() {
   load();
   if (!meta.loaded) return 'UNAVAILABLE';
-  return meta.placeholder ? 'PLACEHOLDER_SYNTHETIC' : 'LANDSAT_8_9_SUMMER_MEDIAN';
+  if (meta.placeholder) return 'PLACEHOLDER_SYNTHETIC';
+  return meta.source || 'LANDSAT_8_9_SUMMER_MEDIAN';
+}
+
+/** API 與 UI 共用的誠實資料說明。 */
+function datasetInfo() {
+  const src = source();
+  if (src === 'LANDSAT_8_9_LATEST_AVAILABLE') {
+    return {
+      source: src,
+      label: '最新可用地表溫度（Landsat 8/9 熱紅外，逐像元最近 48 天晴空觀測）',
+      disclaimer:
+        '非即時溫度。每個像元的觀測日期可能不同，請搭配 age_days 判讀；' +
+        '可比較不同路廊，不可分辨同一條路的兩側。',
+      surfaceTempNote: '該點最新可用晴空衛星地表溫度，非即時溫度',
+    };
+  }
+  if (src === 'PLACEHOLDER_SYNTHETIC') {
+    return {
+      source: src,
+      label: '合成示範地表溫度（非 Landsat 觀測）',
+      disclaimer: '合成佔位資料，僅供流程展示，不可用於真實熱暴露判斷。',
+      surfaceTempNote: '合成示範地表溫度，非觀測資料',
+    };
+  }
+  return {
+    source: src,
+    label: '夏季平均地表溫度（Landsat 8/9 熱紅外，100m 網格，2023–2026 夏季中位數）',
+    disclaimer:
+      '非即時溫度。Landsat 過境時間約上午 10:30，代表上午時段。' +
+      '可比較不同路廊，不可分辨同一條路的兩側。',
+    surfaceTempNote: '該點夏季平均地表溫度，非即時溫度',
+  };
 }
 
 function stats() {
@@ -173,4 +244,12 @@ function stats() {
   return { ...meta, cells: index ? index.size : 0 };
 }
 
-module.exports = { lookupSurfaceTemp, summarize, source, stats, MAX_DIST_M };
+module.exports = {
+  lookupSurfaceObservation,
+  lookupSurfaceTemp,
+  summarize,
+  source,
+  datasetInfo,
+  stats,
+  MAX_DIST_M,
+};

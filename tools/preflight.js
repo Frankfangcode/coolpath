@@ -285,12 +285,19 @@ function checkProject() {
 function checkLst() {
   const lst = require(path.join(ROOT, 'functions', 'lst.js'));
   const src = lst.source();
-  const isReal = src === 'LANDSAT_8_9_SUMMER_MEDIAN';
+  const isReal = ['LANDSAT_8_9_SUMMER_MEDIAN', 'LANDSAT_8_9_LATEST_AVAILABLE'].includes(src);
+  const stats = lst.stats();
+  const detail =
+    src === 'LANDSAT_8_9_LATEST_AVAILABLE' && stats.maxAgeDays !== null
+      ? `${stats.points} 點，最新可用 Landsat，最舊像元距今 ${stats.maxAgeDays} 天`
+      : `${stats.points} 點，Landsat 實測`;
   add(
     'LST 地表溫度資料',
     isReal ? OK : BAD,
     isReal ? '' : '所有溫度都是合成的，網頁會顯示紅色警告條',
-    isReal ? `${lst.stats().points} 點，Landsat 實測` : '跑 tools/earthengine_lst_export.js 匯出後用 verify_lst_grid.js --install 安裝'
+    isReal
+      ? detail
+      : '跑 tools/earthengine_lst_export.js 匯出，或用 npm run lst:import-cog -- <檔案.tif> --install'
   );
 }
 

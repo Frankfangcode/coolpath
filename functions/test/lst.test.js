@@ -54,15 +54,15 @@ t('GeoJSON 載入成功且點數合理', () => {
   assert.ok(s.points > 10000, `只載到 ${s.points} 點`);
 });
 
-t('政大查得到地表溫度，且落在合理區間 26–46°C', () => {
+t('政大查得到地表溫度，且落在合理物理區間', () => {
   const v = lst.lookupSurfaceTemp(政大.lat, 政大.lng);
   assert.ok(v !== null, '回傳 null');
-  assert.ok(v >= 26 && v <= 46, `${v}°C 超出合理範圍`);
+  assert.ok(v >= 0 && v <= 70, `${v}°C 超出合理範圍`);
 });
 
 t('台北車站查得到地表溫度', () => {
   const v = lst.lookupSurfaceTemp(台北車站.lat, 台北車站.lng);
-  assert.ok(v !== null && v >= 26 && v <= 46, `得到 ${v}`);
+  assert.ok(v !== null && v >= 0 && v <= 70, `得到 ${v}`);
 });
 
 t('市中心比政大山區熱（驗證經緯度沒顛倒）', () => {
@@ -73,7 +73,7 @@ t('市中心比政大山區熱（驗證經緯度沒顛倒）', () => {
 
 t('高雄也查得到（全台網格）', () => {
   const v = lst.lookupSurfaceTemp(22.6273, 120.3014);
-  assert.ok(v !== null && v >= 26 && v <= 46, `得到 ${v}`);
+  assert.ok(v !== null && v >= 0 && v <= 70, `得到 ${v}`);
 });
 
 t('高雄市區比玉山熱（全台模型的都市熱島）', () => {
@@ -93,6 +93,14 @@ t('把經緯度顛倒過來查會回 null（座標順序的防呆）', () => {
 t('無效輸入回傳 null 而不是丟例外', () => {
   assert.strictEqual(lst.lookupSurfaceTemp(NaN, 121), null);
   assert.strictEqual(lst.lookupSurfaceTemp(undefined, undefined), null);
+});
+
+t('最新觀測資料會帶回 age_days', () => {
+  const observation = lst.lookupSurfaceObservation(台北車站.lat, 台北車站.lng);
+  assert.ok(observation && Number.isFinite(observation.temp));
+  if (lst.source() === 'LANDSAT_8_9_LATEST_AVAILABLE') {
+    assert.ok(Number.isFinite(observation.ageDays) && observation.ageDays >= 0);
+  }
 });
 
 console.log('\ngeo.js —— polyline 與沿線取樣');
@@ -175,7 +183,7 @@ const heat = lst.summarize(samples);
 
 t('沿線統計算得出來，且覆蓋率夠高', () => {
   assert.ok(heat.avg !== null, '平均溫度為 null');
-  assert.ok(heat.avg >= 26 && heat.avg <= 46, `平均 ${heat.avg}°C 超出合理範圍`);
+  assert.ok(heat.avg >= 0 && heat.avg <= 70, `平均 ${heat.avg}°C 超出合理範圍`);
   assert.ok(heat.max >= heat.avg && heat.avg >= heat.min, '最大/平均/最小關係不對');
   assert.ok(
     heat.coveredPoints / heat.samplePoints > 0.9,
@@ -185,7 +193,10 @@ t('沿線統計算得出來，且覆蓋率夠高', () => {
 
 t('資料來源標記正確反映目前用的是哪種資料', () => {
   const src = lst.source();
-  assert.ok(['LANDSAT_8_9_SUMMER_MEDIAN', 'PLACEHOLDER_SYNTHETIC'].includes(src), src);
+  assert.ok(
+    ['LANDSAT_8_9_SUMMER_MEDIAN', 'LANDSAT_8_9_LATEST_AVAILABLE', 'PLACEHOLDER_SYNTHETIC'].includes(src),
+    src
+  );
 });
 
 console.log(

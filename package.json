@@ -12,6 +12,10 @@
     "deploy:preview": "firebase hosting:channel:deploy demo",
     "test": "cd functions && npm test",
     "verify:lst": "node tools/verify_lst_grid.js",
+    "lst:import-cog": "node tools/import_latest_lst_cog.js",
     "grid:placeholder": "node tools/make_placeholder_grid.js"
+  },
+  "devDependencies": {
+    "geotiff": "^3.0.5"
   }
 }
